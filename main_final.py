@@ -160,6 +160,31 @@ def download_image(url, output_path, filename):
 
     return image_path
 
+def save_generated_image(img, output_path, filename):
+    os.makedirs(output_path, exist_ok=True)
+    img.save(os.path.join(output_path, f"{filename}.png"))
+
+
+def get_download_link(output_path):
+    files = [f for f in os.listdir(output_path) if f.endswith(".png")]
+    with st.spinner("Creating ZIP file..."):
+        for file in files:
+            img_path = os.path.join(output_path, file)
+            img = Image.open(img_path)
+            save_generated_image(img, output_path, file)
+
+        # Zip the files
+        zip_file_path = os.path.join(output_path, "generated_images.zip")
+        with ZipFile(zip_file_path, "w") as zipf:
+            for file in files:
+                img_path = os.path.join(output_path, file)
+                zipf.write(img_path, file)
+
+    # Provide download link
+    zip_link = f'<a href="/download/{zip_file_path}" download>Click here to download ZIP file</a>'
+    return zip_link
+
+
 # Function to generate images
 def generate_images(excel_file, template_images, text_data_by_template, output_path):
     data = pd.read_excel(excel_file)
@@ -247,42 +272,27 @@ def generate_images(excel_file, template_images, text_data_by_template, output_p
 
 
 
-# Streamlit app
 st.title("Image Generator App")
 
-# Choose input type: Excel or Single Image
 input_type = st.radio("Choose Input Type:", ["Excel File", "Single Image"])
 
 if input_type == "Excel File":
-    # Upload Excel file
     excel_file = st.file_uploader("Upload Excel File", type=["xlsx", "xls"])
 
-    # Display user inputs
     if excel_file:
         st.success("Excel file uploaded successfully!")
-
-        # Get the columns from the Excel file
         columns = pd.read_excel(excel_file).columns.tolist()
 
-        # Multi-select dropdown for selecting columns
         selected_columns = st.multiselect("Select Columns to Include in Image", columns)
-
-        # Upload multiple template images
         template_images = st.file_uploader("Upload Template Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
         if template_images:
             st.success("Template images uploaded successfully!")
+            output_path = st.text_input("Enter Output Folder Path:", "Desktop\\output_images")
 
-            # Display user inputs
-            output_path = st.text_input("Enter Output Folder Path:", os.path.join("C:", "Users"))
-
-            # Get the number of template images
-            num_templates = len(template_images)
-
-            # Text and Font Size input for each template size and selected column
             text_data_by_template = {}
-            for i in range(num_templates):
-                image_dimensions = Image.open(template_images[i]).size
+            for i, template_image in enumerate(template_images):
+                image_dimensions = Image.open(template_image).size
                 st.write(f"### Template {i+1} ({image_dimensions[0]}x{image_dimensions[1]})")
                 text_data_by_column = {}
                 for col in selected_columns:
@@ -293,73 +303,61 @@ if input_type == "Excel File":
                     position_y = st.number_input(f"Enter Y-coordinate for {col} - Template {i+1}", value=50)
                     text_color = st.color_picker(f"Choose Text Color for {col} - Template {i+1}", "#FFFFFF")
 
-                    # Use the column name directly as the text, no need to prompt the user
                     text = col
 
                     if text and font_path_local:
-                        # Save the uploaded font file locally with the correct extension
                         font_path_local = save_uploaded_font(font_path_local, col, i+1)
-
                         text_data_by_column[col] = (text, font_path_local, font_size, (position_x, position_y), text_color)
 
                 text_data_by_template[f"Template {i+1}"] = text_data_by_column
 
-            # Generate images on button click
             if st.button("Generate Images"):
-                # Create output folder if it doesn't exist
                 os.makedirs(output_path, exist_ok=True)
-
-                # Call the function to generate images
                 generate_images(excel_file, template_images, text_data_by_template, output_path)
-
                 st.success("Images generated successfully!")
 
+                if st.button("Download Generated Images"):
+                    st.markdown(get_download_link(output_path), unsafe_allow_html=True)
+
 elif input_type == "Single Image":
-    # Upload Template Image
     template_images = st.file_uploader("Upload Template Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+
     if template_images:
         st.success("Template images uploaded successfully!")
-        # Display user inputs
         font_size = st.slider("Select Font Size", min_value=10, max_value=100, value=30, key="font_size")
-        # Number of texts input
         num_texts = st.selectbox("Select Number of Texts", list(range(1, 6)), index=0, key="num_texts")
         texts = []
         text_positions = []
+
         for i in range(num_texts):
             texts.append(st.text_input(f"Enter Text {i+1}"))
             text_positions_x = st.number_input(f"Enter X-coordinate for Text {i+1}", value=50)
             text_positions_y = st.number_input(f"Enter Y-coordinate for Text {i+1}", value=50)
             text_positions.append((text_positions_x, text_positions_y))
-        # Font Size slider
+
         font_size = st.slider("Select Font Size", min_value=10, max_value=100, value=30)
-        # Upload Font
         font_file = st.file_uploader("Upload Font", type=["ttf"])
-        # Text Color input
         text_color = st.color_picker("Choose Text Color", "#FFFFFF")
+
         if template_images and texts and font_file:
             st.success("Files uploaded successfully!")
-            # Display user inputs
             output_folder = st.text_input("Enter Output Folder Path:", "Output Images")
-            output_filename = st.text_input("Enter Output Filename:", "output_image.png")
-            # Combine folder and filename to create the complete output path
-            output_path = os.path.join(output_folder, output_filename)
+
             if not output_folder:
                 st.warning("Please enter a valid output folder path.")
             else:
-                # Create output folder if it doesn't exist
                 os.makedirs(output_folder, exist_ok=True)
-                # Save the uploaded font file locally with the correct extension
                 font_path_local = save_uploaded_font(font_file, "user", 0)
-                # Call the function to write text on the image
                 text_data_for_image = [(text, font_path_local, font_size, position, text_color) for text, position in zip(texts, text_positions)]
                 text_data_by_template = {"Template 1": {"Single Image": text_data_for_image}}
-                generate_images(None, template_images, text_data_by_template, output_path)
+                generate_images(None, template_images, text_data_by_template, output_folder)
                 st.success("Image generated successfully!")
+
         output_path = st.text_input("Enter Output Folder Path:", "output_images")
-        # Generate images on button click
+
         if st.button("Generate Images"):
-            # Create output folder if it doesn't exist
             os.makedirs(output_path, exist_ok=True)
-            # Call the function to generate images
-            # generate_images(None, template_images, font_size, output_path, text_data)
+            generate_images(None, template_images, text_size, output_path, text_data)
             st.success("Images generated successfully!")
+            if st.button("Download Generated Images"):
+                st.markdown(get_download_link(output_path), unsafe_allow_html=True)
