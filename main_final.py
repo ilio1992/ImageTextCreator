@@ -274,7 +274,7 @@ if input_type == "Excel File":
             st.success("Template images uploaded successfully!")
 
             # Display user inputs
-            output_path = st.text_input("Enter Output Folder Path:", "output_images")
+            output_path = st.text_input("Enter Output Folder Path:", "Desktop\\output_images")
 
             # Get the number of template images
             num_templates = len(template_images)
