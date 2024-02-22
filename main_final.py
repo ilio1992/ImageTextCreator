@@ -4,8 +4,9 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 import requests
 import textwrap
+from zipfile import ZipFile
 from io import BytesIO
-
+import base64
 
 def find_empty_space(template_image):
     # Function to find the coordinates of the empty space in the template image
@@ -42,15 +43,8 @@ def find_empty_space(template_image):
                 right = x
                 break
 
-    print("Top:", top)
-    print("Bottom:", bottom)
-    print("Left:", left)
-    print("Right:", right)
-
     return top, bottom, left, right
 
-
-# Function to save the uploaded font file locally
 def save_uploaded_font(font_file, prefix, index):
     # Create "fonts" folder if it doesn't exist
     os.makedirs("fonts", exist_ok=True)
@@ -61,8 +55,6 @@ def save_uploaded_font(font_file, prefix, index):
         f.write(font_file_bytes)
     return font_path_local
 
-
-# Function to write text on the image
 def write_text_on_image(img, text_data):
     draw = ImageDraw.Draw(img)
     for text, font_path, font_size, position, text_color in text_data:
@@ -78,36 +70,6 @@ def write_text_on_image(img, text_data):
             draw.text((x_position, y_position), line, font=font, fill=text_color)
             y_position += h
 
-
-# Function to resize an image while maintaining the aspect ratio and matching target dimensions
-# def resize_image(image, target_size):
-#     width, height = image.size
-#     target_width, target_height = target_size
-#
-#     aspect_ratio = width / height
-#     target_aspect_ratio = target_width / target_height
-#
-#     if aspect_ratio > target_aspect_ratio:
-#         new_width = int(target_height * aspect_ratio)
-#         new_height = target_height
-#     else:
-#         new_height = int(target_width / aspect_ratio)
-#         new_width = target_width
-#
-#     resized_image = image.resize((new_width, new_height), Image.ANTIALIAS)
-#
-#     # Calculate areas for strategic crop
-#     left = max((new_width - target_width) / 2, 0)
-#     top = max((new_height - target_height) / 2, 0)
-#     right = min(left + target_width, new_width)
-#     bottom = min(top + target_height, new_height)
-#
-#     # Crop the image strategically
-#     resized_image = resized_image.crop((left, top, right, bottom))
-#
-#     return resized_image
-
-#resize_image function keeps the width same with the width of the template image and changes the height by keeping the aspect ratio the same
 def resize_image(image, target_size, empty_space_position):
     width, height = image.size
     target_width, target_height = target_size
@@ -130,9 +92,6 @@ def resize_image(image, target_size, empty_space_position):
     right = (new_width + target_width) / 2
     bottom = (new_height + target_height) / 2
 
-    print("left, top, right, bottom:", left, top, right, bottom)
-    print("new_width, new_height, target_width, target_height:", new_width, new_height, target_width, target_height)
-
     if empty_space_position == "top":
         top = 0
         bottom = target_height
@@ -145,9 +104,6 @@ def resize_image(image, target_size, empty_space_position):
 
     return white_img
 
-
-
-# Function to download an image from a URL and save it locally
 def download_image(url, output_path, filename):
     response = requests.get(url, stream=True)
     image_path = os.path.join(output_path, f"{filename}.png")
@@ -160,118 +116,88 @@ def download_image(url, output_path, filename):
 
     return image_path
 
-def save_generated_image(img, output_path, filename):
-    os.makedirs(output_path, exist_ok=True)
-    img.save(os.path.join(output_path, f"{filename}.png"))
+def get_download_link(zip_buffer):
+    # Function to get a download link for the in-memory zip file
+    zip_filename = "generated_images.zip"
+    zip_data = zip_buffer.getvalue()
+    b64_zip_data = base64.b64encode(zip_data).decode()
+    href = f'<a href="data:application/zip;base64,{b64_zip_data}" download="{zip_filename}">Click here to download ZIP file</a>'
+
+    return href
 
 
-def get_download_link(output_path):
-    files = [f for f in os.listdir(output_path) if f.endswith(".png")]
-    with st.spinner("Creating ZIP file..."):
-        for file in files:
-            img_path = os.path.join(output_path, file)
-            img = Image.open(img_path)
-            save_generated_image(img, output_path, file)
-
-        # Zip the files
-        zip_file_path = os.path.join(output_path, "generated_images.zip")
-        with ZipFile(zip_file_path, "w") as zipf:
-            for file in files:
-                img_path = os.path.join(output_path, file)
-                zipf.write(img_path, file)
-
-    # Provide download link
-    zip_link = f'<a href="/download/{zip_file_path}" download>Click here to download ZIP file</a>'
-    return zip_link
-
-
-# Function to generate images
-def generate_images(excel_file, template_images, text_data_by_template, output_path):
+def generate_images(excel_file, template_images, text_data_by_template):
     data = pd.read_excel(excel_file)
 
-    # Get the number of template images
-    num_templates = len(template_images)
+    zip_buffer = BytesIO()  # Create an in-memory zip file
 
-    # Iterate over the range of num_templates
-    for i in range(num_templates):
-        # Get the current template image and its dimensions
-        template_image = Image.open(template_images[i]).convert("RGBA")
-        template_dimensions = (template_image.size[0], template_image.size[1])
+    with ZipFile(zip_buffer, 'a') as zipf:
+        for i, template_image_path in enumerate(template_images):
+            template_image = Image.open(template_image_path).convert("RGBA")
+            st.write(f"### Template {i + 1} ({template_image.size[0]}x{template_image.size[1]})")
 
-        st.write(f"### Template {i+1} ({template_dimensions[0]}x{template_dimensions[1]})")
+            text_data_by_column = text_data_by_template.get(f"Template {i + 1}", {})
+            template_width, template_height = template_image.size
 
-        # Get text data for the current template
-        text_data_by_column = text_data_by_template.get(f"Template {i+1}", {})
+            dimensions_to_column = {
+                (1080, 1080): 'photo_url_square',
+                (1080, 1920): 'photo_url_story',
+                (1200, 628): 'photo_url_landscape',
+                (1920, 1080): 'photo_url_wide',
+            }
 
-        # Get the dimensions of the template image
-        template_width, template_height = template_image.size
+            photo_url_column = dimensions_to_column.get((template_width, template_height), None)
 
-        # Map dimensions to corresponding photo_url column
-        dimensions_to_column = {
-            (1080, 1080): 'photo_url_square',
-            (1080, 1920): 'photo_url_story',
-            (1200, 628): 'photo_url_landscape',
-            (1920, 1080): 'photo_url_wide',
-            # Add more dimensions as needed
-        }
+            if photo_url_column is None:
+                st.error(f"No matching photo_url column for template {i + 1} dimensions: {template_width}x{template_height}")
+                continue
 
-        # Get the corresponding photo_url column based on dimensions
-        photo_url_column = dimensions_to_column.get((template_width, template_height), None)
+            top, bottom, left, right = find_empty_space(template_image)
 
-        if photo_url_column is None:
-            st.error(f"No matching photo_url column for template {i+1} dimensions: {template_width}x{template_height}")
-            continue
+            for index, row in data.iterrows():
+                img_url = row[photo_url_column]
+                img_path = download_image(img_url, ".", f"{row['shop_id']}_image")
+                url_img = Image.open(img_path).convert("RGBA")
 
-        # Find the empty space in the current template image
-        top, bottom, left, right = find_empty_space(template_image)
+                empty_space_position = "top" if top < template_image.height / 2 else "bottom"
+                url_img = resize_image(url_img, template_image.size, empty_space_position)
 
-        for index, row in data.iterrows():
-            # Download and open image from URL based on the selected column
-            img_url = row[photo_url_column]
-            img_path = download_image(img_url, output_path, f"{row['shop_id']}_image")
-            url_img = Image.open(img_path).convert("RGBA")
+                result_img = Image.new("RGBA", template_image.size, (0, 0, 0, 0))
+                result_img.paste(template_image, (0, 0))
 
-            # Resize URL image to match the dimensions of the template image
-            empty_space_position = "top" if top < template_image.height / 2 else "bottom"
-            url_img = resize_image(url_img, template_image.size, empty_space_position)
-            url_img.save(os.path.join(output_path, f"{row['shop_id']}_url_img_{i+1}_{template_width}x{template_height}.png"))
+                if top < template_image.height / 2:
+                    result_img = Image.alpha_composite(url_img, template_image)
+                else:
+                    result_img = Image.alpha_composite(url_img, template_image)
 
-            # Composite the images at the calculated position
-            result_img = Image.new("RGBA", template_image.size, (0, 0, 0, 0))
-            result_img.paste(template_image, (0, 0))
+                for column, text_data in text_data_by_column.items():
+                    text, font_path, font_size, position, text_color = text_data
+                    cell_content = str(row[column])
+                    final_text = cell_content if cell_content else text
 
-            # Check if the empty space is at the top or bottom and paste accordingly
-            if top < template_image.height / 2:
-                #result_img.paste(url_img, (int(left), int(top)), url_img)
-                result_img = Image.alpha_composite(url_img, template_image)
-                print("URL image pasted at the top")
-            else:
-                #result_img.paste(url_img, (int(left), int(bottom - url_img.height)), url_img)
-                result_img = Image.alpha_composite(url_img, template_image)
-                print("URL image pasted at the bottom")
+                    if final_text:
+                        text_data_for_column = [(final_text, font_path, font_size, position, text_color)]
+                        write_text_on_image(result_img, text_data_for_column)
 
+                # Save the image to the in-memory zip file
+                img_filename = f"{row['shop_id']}_result_{i + 1}_{template_width}x{template_height}.png"
 
-            # Write text on the composed image for each selected column
-            for column, text_data in text_data_by_column.items():
-                text, font_path, font_size, position, text_color = text_data
-                cell_content = str(row[column])
-                final_text = cell_content if cell_content else text
+                # Save the image to a BytesIO buffer
+                image_buffer = BytesIO()
+                result_img.save(image_buffer, format="PNG")
+                image_data = image_buffer.getvalue()
 
-                if final_text:
-                    text_data_for_column = [(final_text, font_path, font_size, position, text_color)]
-                    write_text_on_image(result_img, text_data_for_column)
-
-            # Save the resulting image
-            result_img.save(os.path.join(output_path, f"{row['shop_id']}_result_{i+1}_{template_width}x{template_height}.png"))
-
-        # Delete downloaded images for the current template
-        for index, row in data.iterrows():
-            img_path = os.path.join(output_path, f"{row['shop_id']}_image.png")
-            os.remove(img_path)
+                # Write the BytesIO buffer to the ZIP file
+                zipf.writestr(img_filename, image_data)
 
 
+            for index, row in data.iterrows():
+                img_path = os.path.join(".", f"{row['shop_id']}_image.png")
+                os.remove(img_path)
 
+    return zip_buffer
 
+# Streamlit App
 st.title("Image Generator App")
 
 input_type = st.radio("Choose Input Type:", ["Excel File", "Single Image"])
@@ -288,36 +214,34 @@ if input_type == "Excel File":
 
         if template_images:
             st.success("Template images uploaded successfully!")
-            output_path = st.text_input("Enter Output Folder Path:", "Desktop\\output_images")
 
             text_data_by_template = {}
             for i, template_image in enumerate(template_images):
                 image_dimensions = Image.open(template_image).size
-                st.write(f"### Template {i+1} ({image_dimensions[0]}x{image_dimensions[1]})")
+                st.write(f"### Template {i + 1} ({image_dimensions[0]}x{image_dimensions[1]})")
                 text_data_by_column = {}
                 for col in selected_columns:
                     st.write(f"#### Column: {col}")
-                    font_path_local = st.file_uploader(f"Upload Font for {col} - Template {i+1}", type=["ttf"])
-                    font_size = st.slider(f"Select Font Size for {col} - Template {i+1}", min_value=10, max_value=140, value=30)
-                    position_x = st.number_input(f"Enter X-coordinate for {col} - Template {i+1}", value=50)
-                    position_y = st.number_input(f"Enter Y-coordinate for {col} - Template {i+1}", value=50)
-                    text_color = st.color_picker(f"Choose Text Color for {col} - Template {i+1}", "#FFFFFF")
+                    font_path_local = st.file_uploader(f"Upload Font for {col} - Template {i + 1}", type=["ttf"])
+                    font_size = st.slider(f"Select Font Size for {col} - Template {i + 1}", min_value=10, max_value=140, value=30)
+                    position_x = st.number_input(f"Enter X-coordinate for {col} - Template {i + 1}", value=50)
+                    position_y = st.number_input(f"Enter Y-coordinate for {col} - Template {i + 1}", value=50)
+                    text_color = st.color_picker(f"Choose Text Color for {col} - Template {i + 1}", "#FFFFFF")
 
                     text = col
 
                     if text and font_path_local:
-                        font_path_local = save_uploaded_font(font_path_local, col, i+1)
+                        font_path_local = save_uploaded_font(font_path_local, col, i + 1)
                         text_data_by_column[col] = (text, font_path_local, font_size, (position_x, position_y), text_color)
 
-                text_data_by_template[f"Template {i+1}"] = text_data_by_column
+                text_data_by_template[f"Template {i + 1}"] = text_data_by_column
 
             if st.button("Generate Images"):
-                os.makedirs(output_path, exist_ok=True)
-                generate_images(excel_file, template_images, text_data_by_template, output_path)
+                zip_buffer = generate_images(excel_file, template_images, text_data_by_template)
                 st.success("Images generated successfully!")
 
-                if st.button("Download Generated Images"):
-                    st.markdown(get_download_link(output_path), unsafe_allow_html=True)
+                # Provide a direct link to download the zip file
+                st.markdown(get_download_link(zip_buffer), unsafe_allow_html=True)
 
 elif input_type == "Single Image":
     template_images = st.file_uploader("Upload Template Images", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
@@ -330,9 +254,9 @@ elif input_type == "Single Image":
         text_positions = []
 
         for i in range(num_texts):
-            texts.append(st.text_input(f"Enter Text {i+1}"))
-            text_positions_x = st.number_input(f"Enter X-coordinate for Text {i+1}", value=50)
-            text_positions_y = st.number_input(f"Enter Y-coordinate for Text {i+1}", value=50)
+            texts.append(st.text_input(f"Enter Text {i + 1}"))
+            text_positions_x = st.number_input(f"Enter X-coordinate for Text {i + 1}", value=50)
+            text_positions_y = st.number_input(f"Enter Y-coordinate for Text {i + 1}", value=50)
             text_positions.append((text_positions_x, text_positions_y))
 
         font_size = st.slider("Select Font Size", min_value=10, max_value=100, value=30)
@@ -341,23 +265,12 @@ elif input_type == "Single Image":
 
         if template_images and texts and font_file:
             st.success("Files uploaded successfully!")
-            output_folder = st.text_input("Enter Output Folder Path:", "Output Images")
+            text_data_for_image = [(text, font_file, font_size, position, text_color) for text, position in zip(texts, text_positions)]
+            text_data_by_template = {"Template 1": {"Single Image": text_data_for_image}}
 
-            if not output_folder:
-                st.warning("Please enter a valid output folder path.")
-            else:
-                os.makedirs(output_folder, exist_ok=True)
-                font_path_local = save_uploaded_font(font_file, "user", 0)
-                text_data_for_image = [(text, font_path_local, font_size, position, text_color) for text, position in zip(texts, text_positions)]
-                text_data_by_template = {"Template 1": {"Single Image": text_data_for_image}}
-                generate_images(None, template_images, text_data_by_template, output_folder)
+            if st.button("Generate Images"):
+                zip_buffer = generate_images(None, template_images, text_data_by_template)
                 st.success("Image generated successfully!")
 
-        output_path = st.text_input("Enter Output Folder Path:", "output_images")
-
-        if st.button("Generate Images"):
-            os.makedirs(output_path, exist_ok=True)
-            generate_images(None, template_images, text_size, output_path, text_data)
-            st.success("Images generated successfully!")
-            if st.button("Download Generated Images"):
-                st.markdown(get_download_link(output_path), unsafe_allow_html=True)
+                # Provide a direct link to download the zip file
+                st.markdown(get_download_link(zip_buffer), unsafe_allow_html=True)
