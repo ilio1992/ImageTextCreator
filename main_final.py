@@ -75,16 +75,21 @@ def write_text_on_image(img, text_data):
 
         total_height = 0
         for line in para:
-            w, h = draw.textlength(line, font=font), font.getsize(line)[1]
+            # Use draw.textbbox to get the bounding box of the text
+            bbox = draw.textbbox((0, 0), line, font=font)
+            w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
             total_height += h
 
         y_position = position[1] - total_height // 2
 
         for line in para:
-            w, h = draw.textlength(line, font=font), font.getsize(line)[1]
+            bbox = draw.textbbox((0, 0), line, font=font)
+            w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
             x_position = position[0] - w // 2
             draw.text((x_position, y_position), line, font=font, fill=text_color)
             y_position += h
+
+
 
 
 
