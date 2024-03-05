@@ -8,6 +8,9 @@ from zipfile import ZipFile
 from io import BytesIO
 import base64
 
+
+
+
 def find_empty_space(template_image):
     # Function to find the coordinates of the empty space in the template image
     template_image = template_image.convert("RGBA")
@@ -48,12 +51,18 @@ def find_empty_space(template_image):
 def save_uploaded_font(font_file, prefix, index):
     # Create "fonts" folder if it doesn't exist
     os.makedirs("fonts", exist_ok=True)
-    # Save the uploaded font file locally with the correct extension
-    font_path_local = os.path.join("fonts", f"{prefix}_font_{index}.ttf")
-    font_file_bytes = font_file.read()
-    with open(font_path_local, "wb") as f:
-        f.write(font_file_bytes)
-    return font_path_local
+
+    try:
+        # Save the uploaded font file locally with the correct extension
+        font_path_local = os.path.join("fonts", f"{prefix}_font_{index}.ttf")
+        font_file_bytes = font_file.read()
+        with open(font_path_local, "wb") as f:
+            f.write(font_file_bytes)
+        return font_path_local
+    except Exception as e:
+        print(f"Error saving font file: {e}")
+        return None
+
 
 def write_text_on_image(img, text_data):
     draw = ImageDraw.Draw(img)
@@ -61,14 +70,25 @@ def write_text_on_image(img, text_data):
         font = ImageFont.truetype(font_path, size=font_size)
 
         para = textwrap.wrap(text, width=22)
-        total_height = sum(draw.textsize(line, font=font)[1] for line in para)
+        if not para:
+            continue
+
+        total_height = 0
+        for line in para:
+            w, h = draw.textlength(line, font=font), font.getsize(line)[1]
+            total_height += h
+
         y_position = position[1] - total_height // 2
 
         for line in para:
-            w, h = draw.textsize(line, font=font)
+            w, h = draw.textlength(line, font=font), font.getsize(line)[1]
             x_position = position[0] - w // 2
             draw.text((x_position, y_position), line, font=font, fill=text_color)
             y_position += h
+
+
+
+
 
 def resize_image(image, target_size, empty_space_position):
     width, height = image.size
