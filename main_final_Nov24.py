@@ -69,7 +69,7 @@ def write_text_on_image(img, text_data):
     for text, font_path, font_size, position, text_color in text_data:
         font = ImageFont.truetype(font_path, size=font_size)
 
-        para = textwrap.wrap(text, width=22)
+        para = textwrap.wrap(text, width=30)
         if not para:
             continue
 
